@@ -7,3 +7,4 @@ requests
 pydantic
 python-jose
 passlib
+PyJWT==2.9.0
