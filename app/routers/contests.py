@@ -37,9 +37,13 @@ router = APIRouter(prefix="/contests", tags=["Contests"])
 # Auto-create default contests for a match
 # -----------------------------
 def ensure_default_contests_for_match(db: Session, match_id: str):
-    existing = db.query(Contest).filter(Contest.match_id == match_id).count()
-    if existing > 0:
-        return
+    existing_contests: List[Contest] = (
+        db.query(Contest)
+        .filter(Contest.match_id == match_id)
+        .all()
+    )
+
+    existing_fees = {int(c.entry_fee) for c in existing_contests if c.entry_fee is not None}
 
     # fallback team names
     team_a_name = "TEAM_A"
@@ -53,15 +57,21 @@ def ensure_default_contests_for_match(db: Session, match_id: str):
         if getattr(state, "team_b_name", None):
             team_b_name = state.team_b_name
 
-    # keep contests open for testing / usage
+    # keep contests open
     lock_at = datetime.now(timezone.utc) + timedelta(days=30)
 
+    created_any = False
+
     for slab in DEFAULT_CONTEST_SLABS:
+        fee = int(slab["entry_fee"])
+        if fee in existing_fees:
+            continue
+
         contest = Contest(
             id=f"contest_{uuid.uuid4().hex[:10]}",
             title=slab["title"],
             match_id=match_id,
-            entry_fee=slab["entry_fee"],
+            entry_fee=fee,
             team_a_name=team_a_name,
             team_b_name=team_b_name,
             team_a_mult=str(slab["team_a_mult"]),
@@ -70,8 +80,10 @@ def ensure_default_contests_for_match(db: Session, match_id: str):
             status="open",
         )
         db.add(contest)
+        created_any = True
 
-    db.commit()
+    if created_any:
+        db.commit()
 
 
 # -----------------------------
