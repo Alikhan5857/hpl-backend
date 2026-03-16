@@ -172,6 +172,12 @@ class VerifyOtpIn(BaseModel):
     phone: str
     otp: str
 
+class SaveProfileIn(BaseModel):
+    user_id: str
+    name: str
+    dob: str
+    email: Optional[str] = None
+
 
 @app.post("/auth/send-otp")
 def send_otp(payload: SendOtpIn, db: Session = Depends(get_db)):
@@ -250,6 +256,32 @@ def verify_otp(payload: VerifyOtpIn, db: Session = Depends(get_db)):
         "user_id": str(user.id),
         "token": token,
         "is_profile_complete": is_profile_complete,
+    }
+
+@app.post("/profile/save")
+def save_profile(payload: SaveProfileIn, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == payload.user_id).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="user_not_found")
+
+    if hasattr(user, "name"):
+        user.name = payload.name.strip()
+
+    if hasattr(user, "dob"):
+        user.dob = payload.dob.strip()
+
+    if hasattr(user, "email"):
+        user.email = payload.email.strip() if payload.email else None
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "message": "profile_saved",
+        "user_id": str(user.id),
+        "is_profile_complete": True
     }
 
 

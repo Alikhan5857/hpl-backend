@@ -11,6 +11,10 @@ class User(Base):
     id = Column(String, primary_key=True, index=True)
     phone = Column(String, unique=True, index=True, nullable=False)
 
+    name = Column(String, nullable=True)
+    dob = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+
     otp_hash = Column(String, nullable=True)
     otp_expires_at = Column(DateTime(timezone=True), nullable=True)
 
