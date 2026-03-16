@@ -25,7 +25,6 @@ from .routers.dev import router as dev_router
 from app.routers.wallet import router as wallet_router
 
 from .providers.sportmonks import (
-    list_fixtures,
     get_fixture,
     normalize_scoreboard,
     sportmonks_get,
@@ -39,10 +38,10 @@ app = FastAPI(title="HPL - Hamara Premier League API", version="0.2")
 
 # ---------------- AUTO LOOPS CONFIG ----------------
 AUTO_LOCK_ENABLED = True
-AUTO_LOCK_INTERVAL_SEC = 10  # har 10 sec me check
+AUTO_LOCK_INTERVAL_SEC = 10
 
 AUTO_SETTLE_ENABLED = True
-AUTO_SETTLE_INTERVAL_SEC = 20  # 20 sec me check
+AUTO_SETTLE_INTERVAL_SEC = 20
 
 
 async def auto_lock_loop():
@@ -67,7 +66,7 @@ async def auto_settle_loop():
     Background loop:
     - locked contests check
     - their match finished? -> settle
-    Logic should stay in contests_mod.auto_settle_due_internal(db)
+    Logic stays in contests_mod.auto_settle_due_internal(db)
     """
     while True:
         try:
@@ -91,7 +90,6 @@ async def auto_settle_loop():
 
 @app.on_event("startup")
 async def start_loops():
-    # Stable mode: auto lock on, auto settle off
     asyncio.create_task(auto_lock_loop())
     asyncio.create_task(auto_settle_loop())
 
@@ -138,14 +136,23 @@ class DevCreateUserIn(BaseModel):
 def dev_create_user(payload: DevCreateUserIn, db: Session = Depends(get_db)):
     u = db.query(User).filter(User.phone == payload.phone).first()
     if u:
-        return {"message": "exists", "user_id": u.id}
+        return {"message": "exists", "user_id": str(u.id)}
 
-    u = User(phone=payload.phone, name=payload.name, coins_balance=0)
+    user_kwargs = {
+        "phone": payload.phone,
+        "coins_balance": 0,
+    }
+
+    # Safe: only set name if column exists in model
+    if hasattr(User, "name"):
+        user_kwargs["name"] = payload.name
+
+    u = User(**user_kwargs)
     db.add(u)
     db.commit()
     db.refresh(u)
 
-    return {"message": "created", "user_id": u.id}
+    return {"message": "created", "user_id": str(u.id)}
 
 
 # ---------------- OTP Auth ----------------
@@ -170,9 +177,22 @@ class VerifyOtpIn(BaseModel):
 def send_otp(payload: SendOtpIn, db: Session = Depends(get_db)):
     phone = payload.phone.strip()
 
+    if not phone:
+        raise HTTPException(status_code=400, detail="phone_required")
+
     user = db.query(User).filter(User.phone == phone).first()
+
     if not user:
-        user = User(phone=phone, role="user", coins_balance=0)
+        user_kwargs = {
+            "phone": phone,
+            "coins_balance": 0,
+        }
+
+        # Safe: only set role if column exists
+        if hasattr(User, "role"):
+            user_kwargs["role"] = "user"
+
+        user = User(**user_kwargs)
         db.add(user)
         db.commit()
         db.refresh(user)
@@ -196,6 +216,9 @@ def verify_otp(payload: VerifyOtpIn, db: Session = Depends(get_db)):
     phone = payload.phone.strip()
     otp = payload.otp.strip()
 
+    if not phone or not otp:
+        raise HTTPException(status_code=400, detail="phone_and_otp_required")
+
     user = db.query(User).filter(User.phone == phone).first()
     if not user:
         raise HTTPException(status_code=404, detail="user_not_found")
@@ -209,7 +232,7 @@ def verify_otp(payload: VerifyOtpIn, db: Session = Depends(get_db)):
     if user.otp_hash != _hash_otp(phone, otp):
         raise HTTPException(status_code=400, detail="otp_invalid")
 
-    # Clear OTP
+    # Clear OTP after successful verify
     user.otp_hash = None
     user.otp_expires_at = None
     db.add(user)
@@ -217,10 +240,16 @@ def verify_otp(payload: VerifyOtpIn, db: Session = Depends(get_db)):
 
     token = create_access_token(str(user.id))
 
+    # Safe profile completeness check
+    name_val = getattr(user, "name", None)
+    dob_val = getattr(user, "dob", None)
+    is_profile_complete = bool(name_val and dob_val)
+
     return {
         "message": "verified",
         "user_id": str(user.id),
         "token": token,
+        "is_profile_complete": is_profile_complete,
     }
 
 
@@ -306,6 +335,7 @@ def get_scoreboard(match_id: str, force_refresh: bool = False, db: Session = Dep
         "fixture_id": state.sportmonks_fixture_id,
         "scoreboard": state.normalized,
     }
+
 
 class BindMatchIn(BaseModel):
     match_id: str
