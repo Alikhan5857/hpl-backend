@@ -7,6 +7,7 @@ import asyncio
 import os
 import hashlib
 import random
+import requests
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -36,6 +37,30 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(title="HPL - Hamara Premier League API", version="0.2")
 
 
+# ---------------- MSG91 ----------------
+def send_otp_via_msg91(phone: str, otp: str):
+    auth_key = os.getenv("MSG91_AUTH_KEY")
+    country_code = os.getenv("MSG91_COUNTRY_CODE", "91")
+
+    if not auth_key:
+        raise Exception("MSG91 config missing")
+
+    url = "https://control.msg91.com/api/v5/otp"
+
+    payload = {
+        "mobile": f"{country_code}{phone}",
+        "otp": otp,
+        "authkey": auth_key
+    }
+
+    r = requests.post(url, json=payload, timeout=15)
+
+    if r.status_code >= 400:
+        raise Exception(f"MSG91 send failed: {r.status_code} {r.text}")
+
+    return r.json()
+
+
 # ---------------- AUTO LOOPS CONFIG ----------------
 AUTO_LOCK_ENABLED = True
 AUTO_LOCK_INTERVAL_SEC = 10
@@ -62,12 +87,6 @@ async def auto_lock_loop():
 
 
 async def auto_settle_loop():
-    """
-    Background loop:
-    - locked contests check
-    - their match finished? -> settle
-    Logic stays in contests_mod.auto_settle_due_internal(db)
-    """
     while True:
         try:
             if AUTO_SETTLE_ENABLED:
@@ -143,7 +162,6 @@ def dev_create_user(payload: DevCreateUserIn, db: Session = Depends(get_db)):
         "coins_balance": 0,
     }
 
-    # Safe: only set name if column exists in model
     if hasattr(User, "name"):
         user_kwargs["name"] = payload.name
 
@@ -172,6 +190,7 @@ class VerifyOtpIn(BaseModel):
     phone: str
     otp: str
 
+
 class SaveProfileIn(BaseModel):
     user_id: str
     name: str
@@ -194,7 +213,6 @@ def send_otp(payload: SendOtpIn, db: Session = Depends(get_db)):
             "coins_balance": 0,
         }
 
-        # Safe: only set role if column exists
         if hasattr(User, "role"):
             user_kwargs["role"] = "user"
 
@@ -204,16 +222,21 @@ def send_otp(payload: SendOtpIn, db: Session = Depends(get_db)):
         db.refresh(user)
 
     otp = f"{random.randint(100000, 999999)}"
+
     user.otp_hash = _hash_otp(phone, otp)
     user.otp_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
 
     db.add(user)
     db.commit()
 
+    try:
+        send_otp_via_msg91(phone, otp)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
     return {
-        "message": "otp_generated",
-        "otp": otp,  # DEV only
-        "expires_in_sec": 300,
+        "message": "otp_sent",
+        "expires_in_sec": 300
     }
 
 
@@ -246,12 +269,9 @@ def verify_otp(payload: VerifyOtpIn, db: Session = Depends(get_db)):
 
     token = create_access_token(str(user.id))
 
-    # Safe profile completeness check
     name_val = getattr(user, "name", None)
     dob_val = getattr(user, "dob", None)
     is_profile_complete = bool(name_val and dob_val)
-
-    is_profile_complete = bool(user.name and user.dob)
 
     return {
         "message": "verified",
@@ -259,6 +279,7 @@ def verify_otp(payload: VerifyOtpIn, db: Session = Depends(get_db)):
         "token": token,
         "is_profile_complete": is_profile_complete,
     }
+
 
 @app.post("/profile/save")
 def save_profile(payload: SaveProfileIn, db: Session = Depends(get_db)):
