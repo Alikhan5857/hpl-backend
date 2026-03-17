@@ -40,26 +40,24 @@ app = FastAPI(title="HPL - Hamara Premier League API", version="0.2")
 # ---------------- MSG91 ----------------
 def send_otp_via_msg91(phone: str, otp: str):
     auth_key = os.getenv("MSG91_AUTH_KEY")
-    country_code = os.getenv("MSG91_COUNTRY_CODE", "91")
 
     if not auth_key:
-        raise Exception("MSG91 config missing")
+        raise Exception("MSG91 auth key missing")
 
-    url = "https://control.msg91.com/api/v5/otp"
+    url = f"https://control.msg91.com/api/v5/otp?authkey={auth_key}&mobile=91{phone}&otp={otp}"
 
-    payload = {
-        "mobile": f"{country_code}{phone}",
-        "otp": otp,
-        "authkey": auth_key
-    }
+    r = requests.get(url, timeout=15)
 
-    r = requests.post(url, json=payload, timeout=15)
+    print("MSG91 status:", r.status_code)
+    print("MSG91 response:", r.text)
 
     if r.status_code >= 400:
-        raise Exception(f"MSG91 send failed: {r.status_code} {r.text}")
+        raise Exception(f"MSG91 failed: {r.status_code} {r.text}")
 
-    return r.json()
-
+    try:
+        return r.json()
+    except Exception:
+        return {"raw_response": r.text}
 
 # ---------------- AUTO LOOPS CONFIG ----------------
 AUTO_LOCK_ENABLED = True
