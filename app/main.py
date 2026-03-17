@@ -222,7 +222,6 @@ def send_otp(payload: SendOtpIn, db: Session = Depends(get_db)):
         db.refresh(user)
 
     otp = f"{random.randint(100000, 999999)}"
-
     user.otp_hash = _hash_otp(phone, otp)
     user.otp_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
 
@@ -231,7 +230,9 @@ def send_otp(payload: SendOtpIn, db: Session = Depends(get_db)):
 
     try:
         send_otp_via_msg91(phone, otp)
+        print("OTP sent via MSG91 to:", phone)
     except Exception as e:
+        print("MSG91 ERROR:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
     return {
