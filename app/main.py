@@ -251,6 +251,8 @@ def verify_otp(payload: VerifyOtpIn, db: Session = Depends(get_db)):
     dob_val = getattr(user, "dob", None)
     is_profile_complete = bool(name_val and dob_val)
 
+    is_profile_complete = bool(user.name and user.dob)
+
     return {
         "message": "verified",
         "user_id": str(user.id),
